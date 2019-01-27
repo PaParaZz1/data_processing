@@ -14,7 +14,7 @@ class LSTMCell(nn.Module):
             if i == 0:
                 layer.append(nn.Linear(input_dim + hidden_dim[0], hidden_dim[0], bias=self.bias))
             else:
-                layer.append(nn.Linear(hidden_dim[i], hidden_dim[i], bias=self.bias))
+                layer.append(nn.Linear(hidden_dim[i-1], hidden_dim[i], bias=self.bias))
         self.main = nn.Sequential(*layer)
         self.fc1 = nn.Linear(input_dim + hidden_dim, hidden_dim, bias=self.bias)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim, bias=self.bias)
