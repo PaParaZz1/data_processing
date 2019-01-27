@@ -1,10 +1,12 @@
 import copy
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 
 
 class MetaData(object):
     drug_number = {}
+    is_generated_str = {True: 'G', False: 'O'}
 
     def __init__(self, origin_term, is_generated=False):
         self.year = origin_term[0]
@@ -21,7 +23,8 @@ class MetaData(object):
 
     def __str__(self):
         return (self.year + '_' + self.id + '_' + str(self.drug_number[self.drug]) +
-                '_' + self.drug_report + '_' + self.total_county + '_' + self.total_state)
+                '_' + self.drug_report + '_' + self.total_county + '_' + self.total_state +
+                '_' + self.county_name + '_' + self.is_generated_str[self.is_generated])
 
 
 class GDPData(object):
@@ -76,34 +79,72 @@ def GDP_weighted(term_list, GDP_list):
     return np.dot(weight_np, drug_np)
 
 
-def drug_weighted(term_list):
-    drug_list = [int(x.drug_report) for x in term_list]
-    drug_np = np.array(drug_list)
-    mean = drug_np.mean()
-    std = drug_np.std()
-    drug_np_new = drug_np[drug_np > mean + std]
-
-
 def generate_real_distance(origin_distance_path):
     def lat_lng_to_distance(lat1, lng1, lat2, lng2):
-        return 1
+        lat1, lng1, lat2, lng2 = map(math.radians, [float(lat1), float(lng1), float(lat2), float(lng2)])
+        d_lat = lat2 - lat1
+        d_lng = lng2 - lng1
+        tmp = math.sin(d_lat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lng/2)**2
+        distance = 2*math.asin(math.sqrt(tmp)) * 6371
+        distance = round(distance, 3)
+        return distance
 
     with open(origin_distance_path, 'r') as f:
         data = f.readlines()
     result = {}
+    distance_list = []
     for i in range(len(data)):
         item1 = data[i][:-1]
         item1 = item1.split(',')
         for j in range(i+1, len(data)):
             item2 = data[j][:-1]
             item2 = item2.split(',')
-            key1 = item1[0] + item2[0]
-            key2 = item2[0] + item1[0]
+            key1 = item1[0] + '_' + item2[0]
+            key2 = item2[0] + '_' + item1[0]
             distance = lat_lng_to_distance(item1[1], item1[2], item2[1], item2[2])
             result[key1] = distance
             result[key2] = distance
-    print('distance dict length: {}'.format(len(result)))
+            distance_list.append(distance)
+            #print(key1, distance)
+    distance_np = np.array(distance_list)
+    #print(distance_np.max())
+    #print(distance_np.min())
+    #print(distance_np.mean())
     return result
+
+
+def naive_weighted(term_list, use_mean_std=True):
+    if use_mean_std:
+        drug_list = [int(x.drug_report) for x in term_list]
+        drug_np = np.array(drug_list)
+        mean = drug_np.mean()
+        std = drug_np.std()
+        temp_list = []
+        for x in term_list:
+            if int(x.drug_report) < mean + std:
+                temp_list.append(x)
+        term_list = temp_list
+    drug_list = [int(x.drug_report) for x in term_list]
+    drug_np = np.array(drug_list)
+    mean = drug_np.mean()
+    std = drug_np.std()
+    return np.random.normal(mean, std, 1).clip(1, mean + std)
+
+
+def distance_weighted(term_list, target, distance_dict, distance_threshold=999):
+    drug_list = []
+    distance_list = []
+    for item in term_list:
+        key = target + '_' + item.county_name
+        distance = distance_dict[key]
+        if distance < distance_threshold:
+            distance_list.append(distance)
+            drug_list.append(int(item.drug_report))
+    drug_np = np.array(drug_list)
+    distance_np = np.array(distance_list)
+    distance_np /= distance_np.sum()
+    # print(distance_np)
+    return np.dot(drug_np, distance_np)
 
 
 def random_plot(key_list, meta_data_list, random_choice_num=10):
@@ -140,18 +181,22 @@ def random_plot(key_list, meta_data_list, random_choice_num=10):
     print(count_np/sum)
 
 
-def print_list(list_item):
+def print_list(list_item, output_file=None):
     if not isinstance(list_item, list):
         raise TypeError('invalid type in func print_list: {}'.format(type(list_item)))
     for item in list_item:
-        print(item)
+        if output_file == None:
+            print(item)
+        else:
+            print(item, file=output_file)
 
 
-def main(origin_path, target_path, GDP_path, distance_path):
+def main(origin_path, target_path, GDP_path, distance_path, output_path):
     year_number = 8
     init_year = 2010
     ratio_threshold = 0.2
-    generate_real_distance(distance_path)
+    output_file = open(output_path, 'w')
+    distance_dict = generate_real_distance(distance_path)
     with open(origin_path, 'r') as f:
         origin = f.readlines()
     print('origin data', len(origin))
@@ -192,6 +237,7 @@ def main(origin_path, target_path, GDP_path, distance_path):
     # print(GDP_list[0].total_GDP())
 
     # imputation
+    processed_list = []
     for i in range(len(key_list)):
         not_processed = [None for x in range(year_number)]
         template = None
@@ -209,13 +255,18 @@ def main(origin_path, target_path, GDP_path, distance_path):
         template = copy.copy(key_find[0])
         for item in key_find:
             not_processed[int(item.year) - init_year] = item
-        print('---not processed{}'.format(i))
-        print_list(not_processed)
+        # print('---not processed{}'.format(i))
+        # print_list(not_processed)
         processed = [None for x in range(year_number)]
         for j in range(year_number):
             if not_processed[j] is None:
                 year_str = str(2010 + j)
                 year_county_find = meta_data_find(lambda x: x.year == year_str and x.id == template.id, only_one=True)
+                try:
+                    test = year_county_find[0]
+                except IndexError:
+                    print('miss: not find:({}, {})'.format(year_str, template.id))
+                    year_county_find.append(template)
                 year_drug_find = meta_data_find(lambda x: x.year == year_str and x.drug == template.drug)
                 # other_np = np.array([float(x.drug_report) for x in year_drug_find])
                 imputation_term = copy.copy(template)
@@ -255,12 +306,14 @@ def main(origin_path, target_path, GDP_path, distance_path):
                             imputation_term.drug_report = str(predict)
                         else:
                             estimate_value = (float(not_processed[j-1].drug_report) + float(not_processed[j+1].drug_report)) / 2
-                            print('estimate_value', estimate_value)
-                            #sample_value = np.random.normal(other_mean, other_std, 1).clip(0, 9999)
-                            sample_value = GDP_weighted(year_drug_find, GDP_list)
-                            print('sample_value', sample_value)
-                            final_value = int(round((estimate_value + sample_value)/2))
-                            print('final_value', final_value)
+                            # print('estimate_value', estimate_value)
+                            # sample_value = np.random.normal(other_mean, other_std, 1).clip(0, 9999)
+                            # sample_value = GDP_weighted(year_drug_find, GDP_list)
+                            target = template.county_name
+                            sample_value = distance_weighted(year_drug_find, target, distance_dict)
+                            # print('sample_value', sample_value)
+                            final_value = int(round(estimate_value*0.7 + sample_value*0.3))
+                            # print('final_value', final_value)
                             imputation_term.drug_report = str(final_value)
                 imputation_term.total_county = year_county_find[0].total_county
                 imputation_term.total_state = year_county_find[0].total_state
@@ -268,11 +321,10 @@ def main(origin_path, target_path, GDP_path, distance_path):
                 processed[j] = imputation_term
             else:
                 processed[j] = not_processed[j]
+        print_list(processed, output_file=output_file)
         print('---processed{}'.format(i))
-        print_list(processed)
+    output_file.close()
 
-        if i == 10:
-            break
 
 
 if __name__ == "__main__":
@@ -280,4 +332,5 @@ if __name__ == "__main__":
     target_path = 'KY.txt'
     GDP_path = 'GDP_output.csv'
     distance_path = 'distance.txt'
-    main(origin_path=path, target_path=target_path, GDP_path=GDP_path, distance_path=distance_path)
+    output_path = 'processed_data.txt'
+    main(origin_path=path, target_path=target_path, GDP_path=GDP_path, distance_path=distance_path, output_path=output_path)
