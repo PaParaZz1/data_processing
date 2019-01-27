@@ -9,24 +9,24 @@ class LSTMCell(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.bias = bias
+        self.activation = nn.Tanh()
         layer = []
         for i in range(len(hidden_dim)):
             if i == 0:
                 layer.append(nn.Linear(input_dim + hidden_dim[0], hidden_dim[0], bias=self.bias))
             else:
                 layer.append(nn.Linear(hidden_dim[i-1], hidden_dim[i], bias=self.bias))
+            layer.append(self.activation)
         self.main = nn.Sequential(*layer)
-        self.fc1 = nn.Linear(input_dim + hidden_dim, hidden_dim, bias=self.bias)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim, bias=self.bias)
-        self.W = nn.Linear(hidden_dim, 4 * hidden_dim, bias=self.bias)
+        self.weight = nn.Linear(self.hidden_dim[-1], 4 * hidden_dim[-1], bias=self.bias)
 
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
         combined = torch.cat([input_tensor, h_cur], dim=1)
-        x = F.relu(self.fc1(combined))
-        x = F.relu(self.fc2(x))
-        combined_conv = F.relu(self.W(x))
-        cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1)
+        x = self.main(combined) 
+        x = self.weight(x)
+        x = torch.tanh(x)
+        cc_i, cc_f, cc_o, cc_g = torch.split(x, self.hidden_dim[-1], dim=1)
         i = torch.sigmoid(cc_i)
         f = torch.sigmoid(cc_f)
         o = torch.sigmoid(cc_o)
@@ -37,68 +37,34 @@ class LSTMCell(nn.Module):
 
 
 class LSTM(nn.Module):
-    def __init__(self, input_dim=10, lstm_hidden_dim=[40, 30, 15], **kwargs):  # 3 + 7
+    def __init__(self, input_dim=8, lstm_hidden_dim=[30, 45, 40, 30], time_step=3):  # 3 + 5
         super(LSTM, self).__init__()
-        self.lstm = LSTMCell(input_dim, lstm_hidden_dim, bias=True)
-        self.predict = nn.Linear(lstm_hidden_dim[-1], 1)
+        self.time_step = time_step
+        # for i in range(self.time_step):
+            # self.lstm.append(LSTMCell(input_dim, lstm_hidden_dim, bias=True))
+        self.hidden_transform = nn.Linear(input_dim + lstm_hidden_dim[0], lstm_hidden_dim[0])
+        self.lstm = LSTMCell(lstm_hidden_dim[0], lstm_hidden_dim, bias=True)
+        self.predict1 = nn.Linear(lstm_hidden_dim[-1], 10)
+        self.predict2 = nn.Linear(10, 1)
 
     def forward(self, x):
-        return 0
+        batch_size = x.size()[0]
+        hidden = torch.zeros(batch_size, 30).cuda()
+        cell = torch.zeros(batch_size, 30).cuda()
+        for i in range(self.time_step):
+            hidden_state = torch.cat([x[:, i, :], hidden], dim=1)
+            hidden_state = self.hidden_transform(hidden_state)
+            hidden, cell = self.lstm(hidden_state, [hidden_state, cell])
+        x = self.predict1(hidden)
+        x = self.predict2(x)
+                
+        return x
 
 
-class pred_net(nn.Module):
-    def __init__(self, s_dim, a_dim, p_dim, frame_history_len=3, args=None):
-        super(pred_net, self).__init__()
-        self.fc1 = nn.Linear(s_dim * frame_history_len, s_dim * 4)
-        self.fc = nn.Linear(s_dim * 4 + a_dim * 4 + p_dim, s_dim * 4)
-        self.act_fc = nn.Linear(a_dim, a_dim * 4)
-        self.fc2 = nn.Linear(s_dim * 4, s_dim * frame_history_len)
-        self.lstm = LSTMCell(s_dim * 4, s_dim * 4, bias=False)
-        self.reward_layer = nn.Linear(s_dim * 4 + 10, 1)
-        self.s_dim = s_dim
-        self.value_fc = nn.Linear(s_dim * frame_history_len, 1)
-        self.frame_history_len = frame_history_len
-        self.args = args
-
-    def get_value(self, states):
-        # states : batch * pred_step * 4s_dim
-        batch_size = states.size(0)
-        pred_step = states.size(1)
-        states = states.view(-1, self.s_dim * self.frame_history_len)
-        values = self.value_fc(states)
-        return values.view(batch_size, pred_step)
-
-    def forward(self, state, act_sequence, latent):
-        batch_size = int(state.size()[0])
-        state = F.relu(self.fc1(state))
-        hidden_state = torch.cat([state, self.act_fc(act_sequence[:, 0, :]), latent], dim=1)
-        hidden = F.relu(self.fc(hidden_state))
-        cell = hidden
-        pred_step = act_sequence.size(1)
-        rewards, preds, values = [], [], []
-        steps = Variable(torch.ones((batch_size, 10))).to('cuda')
-        for i in range(pred_step):
-            hidden, cell = self.lstm(hidden, [hidden, cell])
-            reward = self.reward_layer(torch.cat([hidden, steps*(i+1)], dim=1))
-            rewards.append(reward.view(-1,1).unsqueeze(1))
-            pred = torch.nn.Tanh()(self.fc2(hidden)) * 3
-            this_value = self.value_fc(pred)
-            values.append(this_value.view(-1,1).unsqueeze(1))
-            preds.append(pred.unsqueeze(1))
-            if i < pred_step-1:
-                hidden_state = torch.cat([hidden, self.act_fc(act_sequence[:, i, :]), latent], dim=1)
-                hidden = F.relu(self.fc(hidden_state))
-            else:
-                this_final_rewards = self.reward_layer(torch.cat([hidden, steps*(i+1)], dim=1))
-        preds = torch.cat(preds, dim=1)
-        rewards = torch.cat(rewards, dim=1)
-        values = torch.cat(values, dim=1)
-        if self.args.method2:
-            rewards[:,-1, :] = rewards[:,-1, :]+ 0.9 * this_final_rewards
-            final_rewards = Variable(torch.zeros_like(rewards)).to('cuda')
-            final_rewards = final_rewards + rewards
-            for i in range(pred_step-1):
-                for j in range(i+1, pred_step):
-                    final_rewards[:,i, :] += rewards[:, j, :] * (0.9 ** (j-i))
-            return preds, final_rewards, values
-        return preds, rewards, values
+if __name__ == "__main__":
+    model = LSTM(input_dim=8, lstm_hidden_dim=[30, 45, 40, 30], time_step=3).cuda()
+    print(model)
+    inputs = torch.randn(6, 3, 8).cuda()
+    output = model(inputs)
+    print(output.shape)
+    print(output.mean())
