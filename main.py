@@ -54,6 +54,17 @@ class GDPData(object):
         #return int(self.person_GDP) * int(self.population)
         return int(self.person_GDP)
 
+def generate_unique_conuty_data(meta_data_list, output_file='unique_data.csv'):
+    result = []
+    seperator = ','
+    for item in meta_data_list:
+        new_item = item.year + seperator + item.county_name + seperator + item.total_county + seperator + item.total_state + '\n'
+        result.append(new_item)
+    result = list(set(result))
+    with open(output_file, 'w') as f:
+        f.writelines(result)
+
+
 
 def GDP_weighted(term_list, GDP_list):
     weight_list = []
@@ -214,6 +225,8 @@ def main(origin_path, target_path, GDP_path, distance_path, output_path):
         meta_data_item = MetaData(split_result)
         meta_data_list.append(meta_data_item)
     MetaData.drug_number = drug_dict
+    generate_unique_conuty_data(meta_data_list)
+    return
     print('drug type num:', len(drug_dict))
     for item in meta_data_list:
         key = item.key()
