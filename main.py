@@ -78,10 +78,15 @@ def exponential_weighted_change_rate(meta_data_list, beta=0.8, output_file='uniq
 
     term_list = []
     seperator = ','
+    '''
     for item in meta_data_list:
         term = item.year + seperator + item.county_name + seperator + item.total_county + seperator + item.total_state + '\n'
         term_list.append(term)
     term_list = list(set(term_list))
+    '''
+    temp_path = 'finish_version.csv'
+    with open(temp_path, 'r') as f:
+        term_list = f.readlines()
     def own_cmp(x, y):
         x = x.split(seperator)
         y = y.split(seperator)
@@ -96,6 +101,7 @@ def exponential_weighted_change_rate(meta_data_list, beta=0.8, output_file='uniq
                 return -1
 
     term_list = sorted(term_list, key=cmp_to_key(own_cmp))
+    print(len(term_list))
     # calculate
     result = []
     estimate_rate_list = []
@@ -105,12 +111,13 @@ def exponential_weighted_change_rate(meta_data_list, beta=0.8, output_file='uniq
             split_data = term_list[i+j][:-1].split(seperator)
             rate.append(float(split_data[-2]) * 1.0 / float(split_data[-1]))
         split_data = term_list[i][:-1].split(seperator)
-        print(rate)
         d_rate = [(rate[x+1] - rate[x]) / rate[x] for x in range(8 - 1)]
-        print(d_rate)
         estimate_rate = exponential_weighted(d_rate, beta=beta)
         estimate_rate_list.append(estimate_rate)
-        print(estimate_rate)
+        if split_data[1] == "BALLARD":
+            print(rate)
+            print(d_rate)
+            print(estimate_rate)
         result.append(split_data[1] + seperator + "%.5f" % (estimate_rate) + '\n')
 
     estimate_rate_np = np.array(estimate_rate_list)
