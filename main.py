@@ -1,5 +1,6 @@
 import copy
 import math
+from functools import cmp_to_key
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -54,6 +55,7 @@ class GDPData(object):
         #return int(self.person_GDP) * int(self.population)
         return int(self.person_GDP)
 
+
 def generate_unique_conuty_data(meta_data_list, output_file='unique_data.csv'):
     result = []
     seperator = ','
@@ -64,6 +66,59 @@ def generate_unique_conuty_data(meta_data_list, output_file='unique_data.csv'):
     with open(output_file, 'w') as f:
         f.writelines(result)
 
+def exponential_weighted_change_rate(meta_data_list, beta=0.8, output_file='unique_data.csv'):
+    def exponential_weighted(data_list, beta=0.8):
+        total_len = len(data_list)
+        prev_s = 0
+        cur_s = 0
+        for i in range(total_len):
+            cur_s = prev_s * (1 - beta) + data_list[i] * beta
+            prev_s = cur_s
+        return cur_s
+
+    term_list = []
+    seperator = ','
+    for item in meta_data_list:
+        term = item.year + seperator + item.county_name + seperator + item.total_county + seperator + item.total_state + '\n'
+        term_list.append(term)
+    term_list = list(set(term_list))
+    def own_cmp(x, y):
+        x = x.split(seperator)
+        y = y.split(seperator)
+        if x[1] > y[1]:
+            return 1
+        elif x[1] < y[1]:
+            return -1
+        else:
+            if x[0] > y[0]:
+                return 1
+            else:
+                return -1
+
+    term_list = sorted(term_list, key=cmp_to_key(own_cmp))
+    # calculate
+    result = []
+    estimate_rate_list = []
+    for i in range(0, len(term_list), 8):
+        rate = []
+        for j in range(8):
+            split_data = term_list[i+j][:-1].split(seperator)
+            rate.append(float(split_data[-2]) * 1.0 / float(split_data[-1]))
+        split_data = term_list[i][:-1].split(seperator)
+        print(rate)
+        d_rate = [(rate[x+1] - rate[x]) / rate[x] for x in range(8 - 1)]
+        print(d_rate)
+        estimate_rate = exponential_weighted(d_rate, beta=beta)
+        estimate_rate_list.append(estimate_rate)
+        print(estimate_rate)
+        result.append(split_data[1] + seperator + "%.5f" % (estimate_rate) + '\n')
+
+    estimate_rate_np = np.array(estimate_rate_list)
+    print(estimate_rate_np.max())
+    print(estimate_rate_np.min())
+
+    with open(output_file, 'w') as f:
+        f.writelines(result)
 
 
 def GDP_weighted(term_list, GDP_list):
@@ -225,7 +280,8 @@ def main(origin_path, target_path, GDP_path, distance_path, output_path):
         meta_data_item = MetaData(split_result)
         meta_data_list.append(meta_data_item)
     MetaData.drug_number = drug_dict
-    generate_unique_conuty_data(meta_data_list)
+    #generate_unique_conuty_data(meta_data_list)
+    exponential_weighted_change_rate(meta_data_list)
     return
     print('drug type num:', len(drug_dict))
     for item in meta_data_list:
