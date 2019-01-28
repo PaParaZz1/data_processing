@@ -62,22 +62,71 @@ class NaiveDataset(Dataset):
 
 
 class AdvancedDataset(Dataset):
-    def __init__(self):
+    def __init__(self, data_file_path, map_file_path, social_economical_path, total_year_num=8, history_year_num=3, so_eco_dim=11, county_num=120):
+        super(AdvancedDataset, self).__init__()
         self.data = []
+        self.label = []
+        self.map_handle = Name2Category(map_file_path)
+        with open(data_file_path, 'r') as f:
+            origin_data = f.readlines()
+        with open(social_economical_path, 'r') as f:
+            social_economical_data = f.readlines()
+        self.social_economical = []
+        self.weight = np.zeros((total_year_num-1, so_eco_dim)).astype(np.float32)
+        for i in range(len(social_economical_data)):
+            split_data = social_economical_data[i][:-1].split(',')
+            self.weight[i//so_eco_dim, i%so_eco_dim] = float(split_data[1][:-1]) / 100.
+            year_term = []
+            for j in range(county_num):
+                year_term.append(int(split_data[2+j]))
+            self.social_economical.append(year_term)
+        self.social_economical = np.array(self.social_economical).astype(np.float32)
+        self.social_economical = self.social_economical.transpose(1, 0)
+        self.social_economical = self.social_economical.reshape(120, total_year_num-1, so_eco_dim)
+        self.social_economical *= self.weight
+        #print(self.social_economical.shape)
+        #print(self.weight.shape)
+        assert(len(origin_data) % total_year_num == 0)
+        for i in range(0, len(origin_data), total_year_num):
+            for j in range(history_year_num, total_year_num-1):
+                data_item = []
+                init_idx = i + j - 3
+                for k in range(history_year_num):
+                    item = origin_data[init_idx + k][:-1]
+                    split_term = item.split('_')
+                    scalar_data = [int(split_term[3]), int(split_term[4]), int(split_term[5])]
+                    scalar_data_np = np.array(scalar_data)
+                    scalar_data_np = np.concatenate([scalar_data_np, self.social_economical[0, 0]], axis=0)
+                    one_hot_data_np = make_one_hot(self.map_handle.space_size, self.map_handle.lookup(split_term[-2]))
+                    data_item.append(np.concatenate([scalar_data_np, one_hot_data_np], axis=0))
+                self.data.append(np.stack(data_item, axis=0))
+                # label
+                split_term = origin_data[i + j]
+                self.label.append(np.array([int(split_term[3])]))
+        '''
+        self.data = np.array(self.data)
+        self.data_min = self.data.min(axis=2).repeat(1, 1, self.data.size()[2])
+        self.data_max = self.data.max(axis=2).repeat(1, 1, self.data.size()[2])
+        self.data = (self.data - self.data_min) / (self.data_max - self.data_min)
+        '''
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         data = self.data[idx]
-        return data
+        label = self.label[idx]
+        data = torch.from_numpy(data).float()
+        label = torch.from_numpy(label).float()
+        return data, label
 
 
 if __name__ == "__main__":
     map_file_path = 'divide.csv'
     data_file_path = 'processed_data.txt'
     #print(make_one_hot(5, 0))
-    handle_dataset = NaiveDataset(data_file_path, map_file_path)
+    #handle_dataset = NaiveDataset(data_file_path, map_file_path)
+    handle_dataset = AdvancedDataset(data_file_path, map_file_path, social_economical_path='2010-2016.csv')
     data, label = handle_dataset[0]
     print(data.shape)
     print(label)

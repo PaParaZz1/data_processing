@@ -56,7 +56,9 @@ def train(train_dataloader, dev_dataloader, model, optimizer, lr_scheduler, args
             cur_length = label.shape[0]
             output = model(feature)
 
-            loss = criterion(output, label)
+            loss_std = 0.1 * torch.max(torch.zeros[1].cuda(), 1-output.std())
+            loss_std = torch.clamp(loss_std, 0, 0.5)
+            loss = criterion(output, label) + loss_std
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -78,17 +80,18 @@ def train(train_dataloader, dev_dataloader, model, optimizer, lr_scheduler, args
 def validate(test_dataloader, model):
     total_correct = 0
     total = 0
+    output_path = 'cmp.txt'
+    output_list = []
     for idx, data in enumerate(test_dataloader):
         feature, label = data
         feature, label = feature.cuda(), label.cuda()
         cur_length = label.shape[0]
         output = model(feature)
+        for i in range(cur_length):
+            output_list.append('gt:{}---predict:{}\n'.format(label.data.cpu().numpy()[i], output.data.cpu().numpy()[i]))
 
-        output_choice = output.data.max(dim=1)[1]
-        correct = output_choice.eq(label).sum().cpu().numpy()
-        total += cur_length
-        total_correct += correct
-    print('test accuracy: %f' % (correct * 1.0 / total))
+    with open(output_path, 'w') as f:
+        f.writelines(output_list)
 
 def main(args):
     if args.model == 'LSTM':
@@ -118,35 +121,41 @@ def main(args):
 
     map_file_path = 'divide.csv'
     data_file_path = 'processed_data.txt'
-    train_set = NaiveDataset(data_file_path, map_file_path)
+    social_economical_path = '2010-2016.csv'
+    if args.dataset == 'NaiveDataset':
+        train_set = NaiveDataset(data_file_path, map_file_path)
+    elif args.dataset == 'AdvancedDataset':
+        train_set = AdvancedDataset(data_file_path, map_file_path, social_economical_path)
+    else:
+        raise ValueError
     train_dataloader = DataLoader(train_set, batch_size=args.batch_size, 
                                   shuffle=True, num_workers=args.num_workers,
                                   pin_memory=True)
 
     if args.evaluate:
-        validate(test_dataloader, model)
+        validate(train_dataloader, model)
         return
 
     train(train_dataloader, train_dataloader, model, optimizer, lr_scheduler, args)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='mcm LSTM')
-    parser.add_argument('--load_path', default='./experiment/naive/epoch_14.pth', type=str)
-    parser.add_argument('--recover', default=True, type=bool)
+    parser.add_argument('--load_path', default='./experiment/advanced_l1/epoch_36.pth', type=str)
+    parser.add_argument('--recover', default=False, type=bool)
     parser.add_argument('--epoch', default=100, type=int)
     parser.add_argument('--optim', default='SGD_momentum', type=str)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0, type=float)
     parser.add_argument('--batch_size', default=16, type=int)
-    parser.add_argument('--input_dim', default=8, type=int)
+    parser.add_argument('--input_dim', default=8 + 11, type=int)
     parser.add_argument('--lstm_hidden_dim', default=[30, 45, 40, 30], type=list)
     parser.add_argument('--time_step', default=3, type=int)
     parser.add_argument('--model', default='LSTM', type=str)
-    parser.add_argument('--dataset', default='NaiveDataset', type=str)
-    parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--evaluate', default=False, type=bool)
-    parser.add_argument('--loss_function', default='MSELoss', type=str)
-    parser.add_argument('--output_dir', default='./experiment/naive_l2', type=str)
+    parser.add_argument('--dataset', default='AdvancedDataset', type=str)
+    parser.add_argument('--num_workers', default='4', type=int)
+    parser.add_argument('--evaluate', default=False)
+    parser.add_argument('--loss_function', default='L1Loss', type=str)
+    parser.add_argument('--output_dir', default='./experiment/advanced_l1', type=str)
 
     args = parser.parse_args()
     if not os.path.exists(args.output_dir):
