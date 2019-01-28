@@ -56,8 +56,11 @@ def train(train_dataloader, dev_dataloader, model, optimizer, lr_scheduler, args
             cur_length = label.shape[0]
             output = model(feature)
 
-            loss_std = 0.1 * torch.max(torch.zeros[1].cuda(), 1-output.std())
+            loss_std = 0.01 * torch.max(torch.zeros(1).cuda(), 1-output.std())
+            print('loss_std0', output.std().item())
+            print('loss_std', loss_std.item())
             loss_std = torch.clamp(loss_std, 0, 0.5)
+            print('loss_std1', loss_std.item())
             loss = criterion(output, label) + loss_std
             optimizer.zero_grad()
             loss.backward()
@@ -142,7 +145,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='mcm LSTM')
     parser.add_argument('--load_path', default='./experiment/advanced_l1/epoch_36.pth', type=str)
     parser.add_argument('--recover', default=False, type=bool)
-    parser.add_argument('--epoch', default=100, type=int)
+    parser.add_argument('--epoch', default=1, type=int)
     parser.add_argument('--optim', default='SGD_momentum', type=str)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0, type=float)
